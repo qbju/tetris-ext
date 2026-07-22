@@ -1,0 +1,1 @@
+typedef unsigned char u8;static volatile u8*out=(volatile u8*)0x00500000;int _start(void){out[0]=0;return 0;}

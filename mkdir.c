@@ -1,0 +1,11 @@
+typedef unsigned char u8;
+static volatile u8 *const out=(volatile u8*)0x00500000;
+static volatile u8 *const in=(volatile u8*)0x00500100;
+static volatile u8 *const call=(volatile u8*)0x00500400;
+static int state=0, name_len=0; static char name[16];
+enum { EXIT=0, WAIT=1, SYSCALL=2 };
+static void puts(const char*s){unsigned n=out[0];while(*s&&n<250)out[1+n++]=(u8)*s++;out[0]=(u8)n;}
+static int getchar(void){unsigned n=in[0],c=in[1];if(c>=n)return -1;in[1]=(u8)(c+1);return in[2+c];}
+static void request(int op){int i;call[0]=(u8)op;call[1]=255;call[2]=(u8)name_len;for(i=0;i<name_len;i++)call[16+i]=(u8)name[i];}
+static void result(void){int i,n=call[4]|(call[5]<<8);if(call[1]){puts("ERROR\n");return;}for(i=0;i<n&&out[0]<250;i++){unsigned p=out[0];out[1+p]=call[32+i];out[0]=(u8)(p+1);}}
+int _start(void){int c;if(state==0){out[0]=0;puts("MKDIR> ");state=1;}if(state==1){while((c=getchar())>=0){if(c==8||c==127){if(name_len>0)name_len--;}else if(c==10){request(4);state=2;return SYSCALL;}else if(name_len<15)name[name_len++]=(char)c;}return WAIT;}if(state==2){result();return EXIT;}return EXIT;}
