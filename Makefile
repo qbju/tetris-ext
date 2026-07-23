@@ -15,5 +15,10 @@ $(BUILD):
 $(BUILD)/%.elf: %.c $(LINKER) | $(BUILD)
 	gcc $(CFLAGS) $(LDFLAGS) -o $@ $<
 
+forth_runtime_blob.h: forth_runtime.c hello.ld tools/embed_forth_runtime.py | $(BUILD)
+	gcc $(CFLAGS) $(LDFLAGS) -o $(BUILD)/forth_runtime.elf forth_runtime.c
+	python3 tools/embed_forth_runtime.py
+$(BUILD)/forthc.elf: forth_runtime_blob.h
+
 clean:
 	rm -f $(TARGETS)

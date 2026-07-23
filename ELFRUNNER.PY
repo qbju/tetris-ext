@@ -930,15 +930,56 @@ def ext_elfrunner_forth_output_number(value: i32) -> bool:
     return ext_elfrunner_forth_output_char(32)
 
 
-def ext_elfrunner_forth_parse(source_length: i32) -> i32:
-    extension_memory_set(589, 0)
-    extension_memory_set(590, 0)
-    position: i32 = 0
-    while position < source_length:
-        while position < source_length and (extension_memory_get(position) == 32 or extension_memory_get(position) == 9 or extension_memory_get(position) == 10 or extension_memory_get(position) == 13): position = position + 1
-        if position >= source_length: break
+def ext_elfrunner_forth_emit(value: i32) -> bool:
+    length: i32 = extension_memory_get(490)
+    if length >= 190: return False
+    extension_memory_set(500 + length, value & 255)
+    extension_memory_set(490, length + 1)
+    return True
+
+
+def ext_elfrunner_forth_emit_i32(value: i32) -> bool:
+    return ext_elfrunner_forth_emit(value) and ext_elfrunner_forth_emit(value >> 8) and ext_elfrunner_forth_emit(value >> 16) and ext_elfrunner_forth_emit(value >> 24)
+
+
+def ext_elfrunner_forth_source_word(a: i32, a_length: i32, b: i32, b_length: i32) -> bool:
+    if a_length != b_length: return False
+    index: i32 = 0
+    while index < a_length:
+        left: i32 = extension_memory_get(a + index); right: i32 = extension_memory_get(b + index)
+        if left >= 97 and left <= 122: left = left - 32
+        if right >= 97 and right <= 122: right = right - 32
+        if left != right: return False
+        index = index + 1
+    return True
+
+
+def ext_elfrunner_forth_compile_range(range_start: i32, range_end: i32, depth: i32) -> i32:
+    if depth > 8: return 2
+    position: i32 = range_start
+    while position < range_end:
+        while position < range_end and (extension_memory_get(position) == 32 or extension_memory_get(position) == 9 or extension_memory_get(position) == 10 or extension_memory_get(position) == 13): position = position + 1
+        if position >= range_end: break
+        if extension_memory_get(position) == 58:
+            position = position + 1
+            while position < range_end and extension_memory_get(position) != 59: position = position + 1
+            if position < range_end: position = position + 1
+            continue
+        if position + 1 < range_end and (extension_memory_get(position) == 83 or extension_memory_get(position) == 115) and extension_memory_get(position + 1) == 34:
+            position = position + 2
+            if position < range_end and extension_memory_get(position) == 32: position = position + 1
+            literal_start: i32 = position
+            while position < range_end and extension_memory_get(position) != 34: position = position + 1
+            literal_length: i32 = position - literal_start
+            if literal_length > 120 or not ext_elfrunner_forth_emit(16) or not ext_elfrunner_forth_emit(literal_length): return 3
+            literal_index: i32 = 0
+            while literal_index < literal_length:
+                if not ext_elfrunner_forth_emit(extension_memory_get(literal_start + literal_index)): return 3
+                literal_index = literal_index + 1
+            if position < range_end: position = position + 1
+            continue
         start: i32 = position
-        while position < source_length and extension_memory_get(position) != 32 and extension_memory_get(position) != 9 and extension_memory_get(position) != 10 and extension_memory_get(position) != 13: position = position + 1
+        while position < range_end and extension_memory_get(position) != 32 and extension_memory_get(position) != 9 and extension_memory_get(position) != 10 and extension_memory_get(position) != 13: position = position + 1
         length: i32 = position - start
         negative: bool = length > 1 and extension_memory_get(start) == 45
         digit_start: i32 = start + 1 if negative else start
@@ -950,51 +991,96 @@ def ext_elfrunner_forth_parse(source_length: i32) -> i32:
             if character < 48 or character > 57: numeric = False
             if numeric: value = value * 10 + character - 48
             scan = scan + 1
-        depth: i32 = extension_memory_get(589)
+        opcode: i32 = -1
         if numeric:
-            if depth >= 32: return 2
-            extension_memory_set(500 + depth, 0 - value if negative else value)
-            extension_memory_set(589, depth + 1)
-        elif ext_elfrunner_forth_word(start, length, "DUP"):
-            if depth < 1 or depth >= 32: return 2
-            extension_memory_set(500 + depth, extension_memory_get(499 + depth)); extension_memory_set(589, depth + 1)
-        elif ext_elfrunner_forth_word(start, length, "DROP"):
-            if depth < 1: return 2
-            extension_memory_set(589, depth - 1)
-        elif ext_elfrunner_forth_word(start, length, "SWAP"):
-            if depth < 2: return 2
-            value = extension_memory_get(498 + depth); scan = extension_memory_get(499 + depth)
-            extension_memory_set(498 + depth, scan); extension_memory_set(499 + depth, value)
-        elif ext_elfrunner_forth_word(start, length, "OVER"):
-            if depth < 2 or depth >= 32: return 2
-            extension_memory_set(500 + depth, extension_memory_get(498 + depth)); extension_memory_set(589, depth + 1)
-        elif ext_elfrunner_forth_word(start, length, "."):
-            if depth < 1: return 2
-            value = extension_memory_get(499 + depth); extension_memory_set(589, depth - 1)
-            if not ext_elfrunner_forth_output_number(value): return 3
-        elif ext_elfrunner_forth_word(start, length, "EMIT"):
-            if depth < 1: return 2
-            value = extension_memory_get(499 + depth); extension_memory_set(589, depth - 1)
-            if not ext_elfrunner_forth_output_char(value): return 3
-        elif ext_elfrunner_forth_word(start, length, "CR"):
-            if not ext_elfrunner_forth_output_char(10): return 3
+            if not ext_elfrunner_forth_emit(1) or not ext_elfrunner_forth_emit_i32(0 - value if negative else value): return 3
         else:
-            if depth < 2: return 1
-            value = extension_memory_get(499 + depth)
-            scan = extension_memory_get(498 + depth)
-            if ext_elfrunner_forth_word(start, length, "+"): scan = scan + value
-            elif ext_elfrunner_forth_word(start, length, "-"): scan = scan - value
-            elif ext_elfrunner_forth_word(start, length, "*"): scan = scan * value
-            elif ext_elfrunner_forth_word(start, length, "/"):
-                if value == 0: return 4
-                scan = scan // value
-            elif ext_elfrunner_forth_word(start, length, "MOD"):
-                if value == 0: return 4
-                scan = scan % value
-            else: return 1
-            extension_memory_set(498 + depth, scan); extension_memory_set(589, depth - 1)
+            if ext_elfrunner_forth_word(start, length, "+"): opcode = 2
+            elif ext_elfrunner_forth_word(start, length, "-"): opcode = 3
+            elif ext_elfrunner_forth_word(start, length, "*"): opcode = 4
+            elif ext_elfrunner_forth_word(start, length, "/"): opcode = 5
+            elif ext_elfrunner_forth_word(start, length, "MOD"): opcode = 6
+            elif ext_elfrunner_forth_word(start, length, "DUP"): opcode = 7
+            elif ext_elfrunner_forth_word(start, length, "DROP"): opcode = 8
+            elif ext_elfrunner_forth_word(start, length, "SWAP"): opcode = 9
+            elif ext_elfrunner_forth_word(start, length, "OVER"): opcode = 10
+            elif ext_elfrunner_forth_word(start, length, "."): opcode = 11
+            elif ext_elfrunner_forth_word(start, length, "EMIT"): opcode = 12
+            elif ext_elfrunner_forth_word(start, length, "CR"): opcode = 13
+            elif ext_elfrunner_forth_word(start, length, "ARGC"): opcode = 14
+            elif ext_elfrunner_forth_word(start, length, "ARG-NUM"): opcode = 15
+            elif ext_elfrunner_forth_word(start, length, "TYPE"): opcode = 17
+            elif ext_elfrunner_forth_word(start, length, "READ-FILE"): opcode = 18
+            elif ext_elfrunner_forth_word(start, length, "WRITE-FILE"): opcode = 19
+            elif ext_elfrunner_forth_word(start, length, "FILE-EXISTS?"): opcode = 20
+            elif ext_elfrunner_forth_word(start, length, "2DUP"): opcode = 21
+            elif ext_elfrunner_forth_word(start, length, "2DROP"): opcode = 22
+            elif ext_elfrunner_forth_word(start, length, "NIP"): opcode = 23
+            elif ext_elfrunner_forth_word(start, length, "TUCK"): opcode = 24
+            elif ext_elfrunner_forth_word(start, length, "ROT"): opcode = 25
+            elif ext_elfrunner_forth_word(start, length, "NEGATE"): opcode = 26
+            elif ext_elfrunner_forth_word(start, length, "ABS"): opcode = 27
+            elif ext_elfrunner_forth_word(start, length, "MIN"): opcode = 28
+            elif ext_elfrunner_forth_word(start, length, "MAX"): opcode = 29
+            elif ext_elfrunner_forth_word(start, length, "="): opcode = 30
+            elif ext_elfrunner_forth_word(start, length, "<>"): opcode = 31
+            elif ext_elfrunner_forth_word(start, length, "<"): opcode = 32
+            elif ext_elfrunner_forth_word(start, length, ">"): opcode = 33
+            elif ext_elfrunner_forth_word(start, length, "0="): opcode = 34
+            elif ext_elfrunner_forth_word(start, length, "AND"): opcode = 35
+            elif ext_elfrunner_forth_word(start, length, "OR"): opcode = 36
+            elif ext_elfrunner_forth_word(start, length, "XOR"): opcode = 37
+            elif ext_elfrunner_forth_word(start, length, "INVERT"): opcode = 38
+            elif ext_elfrunner_forth_word(start, length, "1+"): opcode = 39
+            elif ext_elfrunner_forth_word(start, length, "1-"): opcode = 40
+            elif ext_elfrunner_forth_word(start, length, "2*"): opcode = 41
+            elif ext_elfrunner_forth_word(start, length, "2/"): opcode = 42
+            else:
+                definition_count: i32 = extension_memory_get(759)
+                definition: i32 = 0
+                found: bool = False
+                while definition < definition_count and not found:
+                    meta: i32 = 760 + definition * 4
+                    if ext_elfrunner_forth_source_word(start, length, extension_memory_get(meta), extension_memory_get(meta + 1)):
+                        compile_status: i32 = ext_elfrunner_forth_compile_range(extension_memory_get(meta + 2), extension_memory_get(meta + 3), depth + 1)
+                        if compile_status != 0: return compile_status
+                        found = True
+                    definition = definition + 1
+                if not found: return 1
+            if opcode >= 0 and not ext_elfrunner_forth_emit(opcode): return 3
     return 0
 
+
+def ext_elfrunner_forth_parse(source_length: i32) -> i32:
+    extension_memory_set(490, 0)
+    extension_memory_set(759, 0)
+    position: i32 = 0
+    while position < source_length:
+        while position < source_length and (extension_memory_get(position) == 32 or extension_memory_get(position) == 9 or extension_memory_get(position) == 10 or extension_memory_get(position) == 13): position = position + 1
+        if position >= source_length: break
+        if extension_memory_get(position) == 58:
+            position = position + 1
+            while position < source_length and (extension_memory_get(position) == 32 or extension_memory_get(position) == 9 or extension_memory_get(position) == 10 or extension_memory_get(position) == 13): position = position + 1
+            name_start: i32 = position
+            while position < source_length and extension_memory_get(position) != 32 and extension_memory_get(position) != 9 and extension_memory_get(position) != 10 and extension_memory_get(position) != 13: position = position + 1
+            name_length: i32 = position - name_start
+            while position < source_length and (extension_memory_get(position) == 32 or extension_memory_get(position) == 9 or extension_memory_get(position) == 10 or extension_memory_get(position) == 13): position = position + 1
+            body_start: i32 = position
+            while position < source_length and extension_memory_get(position) != 59: position = position + 1
+            if position >= source_length or name_length <= 0: return 2
+            definition_count: i32 = extension_memory_get(759)
+            if definition_count >= 12: return 2
+            meta: i32 = 760 + definition_count * 4
+            extension_memory_set(meta, name_start); extension_memory_set(meta + 1, name_length)
+            extension_memory_set(meta + 2, body_start); extension_memory_set(meta + 3, position)
+            extension_memory_set(759, definition_count + 1)
+            position = position + 1
+        else:
+            while position < source_length and extension_memory_get(position) != 32 and extension_memory_get(position) != 9 and extension_memory_get(position) != 10 and extension_memory_get(position) != 13: position = position + 1
+    compile_status: i32 = ext_elfrunner_forth_compile_range(0, source_length, 0)
+    if compile_status != 0: return compile_status
+    if not ext_elfrunner_forth_emit(0): return 3
+    return 0
 
 def ext_elfrunner_forth_build_sector(total_size: i32) -> None:
     fs_buffer_clear()
@@ -1033,13 +1119,15 @@ def ext_elfrunner_forth_compile() -> i32:
     parse_status: i32 = ext_elfrunner_forth_parse(source_length)
     if parse_status == 1: ext_elfrunner_result_text("UNKNOWN FORTH WORD\n"); return -1
     if parse_status == 2: ext_elfrunner_result_text("FORTH STACK ERROR\n"); return -1
-    if parse_status == 3: ext_elfrunner_result_text("OUTPUT TOO LONG\n"); return -1
+    if parse_status == 2: ext_elfrunner_result_text("INVALID WORD DEFINITION\n"); return -1
+    if parse_status == 3: ext_elfrunner_result_text("COMPILED PROGRAM TOO LARGE\n"); return -1
     if parse_status == 4: ext_elfrunner_result_text("DIVISION BY ZERO\n"); return -1
     if not ata_read_sector(16): return -1
     count: i32 = fs_get_u32(4)
     if count > 30: count = 30
     target: i32 = -1
     target_lba: i32 = 0
+    target_size: i32 = 0
     reusable: i32 = -1
     next_lba: i32 = 32
     entry: i32 = 0
@@ -1060,17 +1148,40 @@ def ext_elfrunner_forth_compile() -> i32:
             if fs_buffer_get(offset + name_index) != wanted: same = False
             name_index = name_index + 1
         if same and (fs_buffer_get(offset + suffix) != 46 or fs_buffer_get(offset + suffix + 1) != 69 or fs_buffer_get(offset + suffix + 2) != 76 or fs_buffer_get(offset + suffix + 3) != 70): same = False
-        if same: target = entry; target_lba = lba
+        if same: target = entry; target_lba = lba; target_size = size
         entry = entry + 1
     if target < 0:
         if reusable >= 0: target = reusable; target_lba = next_lba
         else:
             if count >= 30: ext_elfrunner_result_text("ELF DIRECTORY FULL\n"); return -1
             target = count; count = count + 1; target_lba = next_lba
-    output_length: i32 = extension_memory_get(590)
-    total_size: i32 = 84 + (output_length + 1) * 7 + 3
-    ext_elfrunner_forth_build_sector(total_size)
-    if not ata_write_sector(target_lba): return -1
+    blob_pointer: i32 = physical_read8(0x00500406) | (physical_read8(0x00500407) << 8) | (physical_read8(0x00500408) << 16) | (physical_read8(0x00500409) << 24)
+    total_size: i32 = physical_read8(0x0050040A) | (physical_read8(0x0050040B) << 8) | (physical_read8(0x0050040C) << 16) | (physical_read8(0x0050040D) << 24)
+    if blob_pointer < 0x00400000 or total_size < 84 or total_size > 32768: ext_elfrunner_result_text("FORTH RUNTIME MISSING\n"); return -1
+    marker_offset: i32 = -1
+    scan_blob: i32 = 0
+    while scan_blob + 4 < total_size and marker_offset < 0:
+        if physical_read8(blob_pointer + scan_blob) == 70 and physical_read8(blob_pointer + scan_blob + 1) == 84 and physical_read8(blob_pointer + scan_blob + 2) == 72 and physical_read8(blob_pointer + scan_blob + 3) == 66: marker_offset = scan_blob
+        scan_blob = scan_blob + 1
+    if marker_offset < 0: ext_elfrunner_result_text("FORTH RUNTIME INVALID\n"); return -1
+    required_sectors: i32 = (total_size + 511) // 512
+    if target >= 0 and target_size > 0 and (target_size + 511) // 512 < required_sectors: target_lba = next_lba
+    sector_index: i32 = 0
+    bytecode_length: i32 = extension_memory_get(490)
+    while sector_index < required_sectors:
+        fs_buffer_clear()
+        sector_byte: i32 = 0
+        while sector_byte < 512:
+            blob_offset: i32 = sector_index * 512 + sector_byte
+            if blob_offset < total_size:
+                blob_value: i32 = physical_read8(blob_pointer + blob_offset)
+                if blob_offset >= marker_offset + 4 and blob_offset < marker_offset + 256:
+                    bytecode_index: i32 = blob_offset - marker_offset - 4
+                    blob_value = extension_memory_get(500 + bytecode_index) if bytecode_index < bytecode_length else 0
+                fs_buffer_set(sector_byte, blob_value)
+            sector_byte = sector_byte + 1
+        if not ata_write_sector(target_lba + sector_index): return -1
+        sector_index = sector_index + 1
     directory_sector: i32 = 16 + target // 15
     if not ata_read_sector(directory_sector): return -1
     offset = 8 + (target % 15) * 32
@@ -1105,6 +1216,24 @@ def ext_elfrunner_forth_compile() -> i32:
         ext_elfrunner_append_char(wanted); index = index + 1
     ext_elfrunner_append_char(10)
     return 0
+
+def ext_elfrunner_forth_write_file() -> i32:
+    global ext_elfrunner_text_length
+    found: bool = ext_elfrunner_text_find(0)
+    if not found:
+        if not ext_elfrunner_text_prepare_new(0): return -1
+    elif fs_buffer_get(8 + ext_elfrunner_text_entry * 32 + 24) != 0: return -1
+    data_length: i32 = physical_read8(0x00500403)
+    if data_length > 220: data_length = 220
+    fs_buffer_clear()
+    index: i32 = 0
+    while index < data_length:
+        fs_buffer_set(index, physical_read8(0x00500420 + index)); index = index + 1
+    if not ata_write_sector(ext_elfrunner_text_lba): return -1
+    if not ata_read_sector(18): return -1
+    fs_put_u32(8 + ext_elfrunner_text_entry * 32 + 20, data_length)
+    ext_elfrunner_text_length = data_length
+    return 0 if ata_write_sector(18) else -1
 
 def ext_elfrunner_service_syscall() -> i32:
     global ext_elfrunner_input_length, ext_elfrunner_text_length, ext_elfrunner_text_cursor, ext_elfrunner_status, ext_elfrunner_waiting_editor
@@ -1180,6 +1309,7 @@ def ext_elfrunner_service_syscall() -> i32:
     elif operation == 24: syscall_status = ext_elfrunner_fs_hexdump()
     elif operation == 25: syscall_status = ext_elfrunner_uptime()
     elif operation == 26: syscall_status = ext_elfrunner_forth_compile()
+    elif operation == 27: syscall_status = ext_elfrunner_forth_write_file()
     else:
         physical_write8(0x00500401, 2)
         return 1
